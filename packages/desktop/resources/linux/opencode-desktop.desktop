@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Zaino AI Agent
+Exec=/opt/Zaino AI Agent/ai.zaino.desktop %U
+Terminal=false
+Type=Application
+Icon=ai.zaino.desktop
+StartupWMClass=ai.zaino.desktop
+NoDisplay=true
+Comment=Zaino AI Agent — desktop client for the Zaino Gateway
+Categories=Development;
