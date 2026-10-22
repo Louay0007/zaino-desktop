@@ -61,7 +61,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
         shell: bash
 
       - name: Build sidecar CLI
@@ -125,7 +125,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile ${{ matrix.install_flags }}
+        run: bun install ${{ matrix.install_flags }}
         shell: bash
 
       - name: Install linux packaging deps
