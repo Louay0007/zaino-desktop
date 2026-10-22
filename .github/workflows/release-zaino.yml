@@ -1,0 +1,238 @@
+name: release
+run-name: "Zaino AI Agent Beta ${{ inputs.version || '1.1.5' }}"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build and release (default 1.1.5)"
+        required: false
+        type: string
+        default: "1.1.5"
+
+permissions:
+  contents: write
+
+env:
+  ZAINO_VERSION: ${{ inputs.version || '1.1.5' }}
+  OPENCODE_CHANNEL: beta
+  ZAINO_UNSIGNED: "1"
+
+jobs:
+  build-cli:
+    name: "CLI ${{ matrix.cli_target }} (${{ matrix.host }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-26
+            rust_target: aarch64-apple-darwin
+            cli_target: opencode-darwin-arm64
+          - host: macos-26-intel
+            rust_target: x86_64-apple-darwin
+            cli_target: opencode-darwin-x64-baseline
+          - host: windows-2025
+            rust_target: aarch64-pc-windows-msvc
+            cli_target: opencode-windows-arm64
+          - host: windows-2025
+            rust_target: x86_64-pc-windows-msvc
+            cli_target: opencode-windows-x64-baseline
+          - host: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+            cli_target: opencode-linux-x64-baseline
+          - host: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            cli_target: opencode-linux-arm64
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        shell: bash
+
+      - name: Build sidecar CLI
+        run: bun ./packages/cli/script/build.ts --target=${{ matrix.cli_target }}
+        shell: bash
+        env:
+          BUN_COMPILE_RELEASE: bun-v1.4.2
+          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
+          OPENCODE_CHANNEL: beta
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaino-cli-${{ matrix.rust_target }}
+          path: packages/cli/dist/*
+          if-no-files-found: error
+
+  build-desktop:
+    name: "Desktop ${{ matrix.rust_target }} (${{ matrix.host }})"
+    needs: build-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-26
+            rust_target: aarch64-apple-darwin
+            platform_flag: --mac --arm64
+            install_flags: --os=darwin --cpu=arm64
+          - host: macos-26-intel
+            rust_target: x86_64-apple-darwin
+            platform_flag: --mac --x64
+            install_flags: --os=darwin --cpu=x64
+          - host: windows-2025
+            rust_target: aarch64-pc-windows-msvc
+            platform_flag: --win --arm64
+            install_flags: --cpu=*
+          - host: windows-2025
+            rust_target: x86_64-pc-windows-msvc
+            platform_flag: --win
+            install_flags: ""
+          - host: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+            platform_flag: --linux
+            install_flags: ""
+          - host: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            platform_flag: --linux --arm64
+            install_flags: ""
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile ${{ matrix.install_flags }}
+        shell: bash
+
+      - name: Install linux packaging deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+        shell: bash
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: zaino-cli-${{ matrix.rust_target }}
+          path: packages/cli/dist
+
+      - name: Prepare desktop
+        run: bun ./scripts/prepare.ts
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
+          OPENCODE_CHANNEL: beta
+          OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
+          OPENCODE_CLI_DIST: ${{ github.workspace }}/packages/cli/dist
+
+      - name: Build desktop
+        run: bun run build
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
+          OPENCODE_CHANNEL: beta
+          OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
+
+      - name: Create macOS .app.tar.gz
+        if: runner.os == 'macOS'
+        working-directory: packages/desktop/dist
+        run: |
+          if [[ "${{ matrix.rust_target }}" == "x86_64-apple-darwin" ]]; then
+            APP_DIR="mac"
+            OUT_NAME="zaino-desktop-mac-x64.app.tar.gz"
+          else
+            APP_DIR="mac-arm64"
+            OUT_NAME="zaino-desktop-mac-arm64.app.tar.gz"
+          fi
+          APP_PATH=$(find "$APP_DIR" -maxdepth 1 -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found in $APP_DIR"
+            exit 1
+          fi
+          tar -czf "$OUT_NAME" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
+        shell: bash
+
+      - name: Package desktop
+        run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.config.ts
+        working-directory: packages/desktop
+        shell: bash
+        timeout-minutes: 60
+        env:
+          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
+          OPENCODE_CHANNEL: beta
+          OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
+          ZAINO_UNSIGNED: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaino-desktop-${{ matrix.rust_target }}
+          path: packages/desktop/dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build-desktop
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zaino-desktop-*
+          path: /tmp/zaino-dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la /tmp/zaino-dist
+        shell: bash
+
+      - name: Publish release v${{ env.ZAINO_VERSION }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.ZAINO_VERSION }}
+          name: Zaino AI Agent Beta ${{ env.ZAINO_VERSION }}
+          body: |
+            ## Zaino AI Agent Beta ${{ env.ZAINO_VERSION }}
+
+            Standalone desktop client for the Zaino Gateway — Fast, Smart and Frontier models, signed in with your gateway account.
+
+            ### Downloads
+            - **macOS (Apple Silicon):** `zaino-desktop-mac-arm64.dmg`
+            - **macOS (Intel):** `zaino-desktop-mac-x64.dmg`
+            - **Windows (x64/arm64):** `zaino-desktop-win-*.exe`
+            - **Linux:** `*.AppImage`, `*.deb`, `*.rpm`
+
+            The app checks this release feed automatically and offers in-app updates.
+          draft: false
+          prerelease: true
+          files: |
+            /tmp/zaino-dist/*
+          fail_on_unmatched_files: true
