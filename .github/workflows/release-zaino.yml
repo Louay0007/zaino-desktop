@@ -159,6 +159,19 @@ jobs:
           OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
           OPENCODE_CHANNEL: beta
           OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
+          OPENCODE_CLI_DIST: ${{ github.workspace }}/packages/cli/dist
+
+      - name: Package desktop
+        run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.config.ts
+        working-directory: packages/desktop
+        shell: bash
+        timeout-minutes: 60
+        env:
+          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
+          OPENCODE_CHANNEL: beta
+          OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
+          ZAINO_UNSIGNED: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create macOS .app.tar.gz
         if: runner.os == 'macOS'
@@ -178,18 +191,6 @@ jobs:
           fi
           tar -czf "$OUT_NAME" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
         shell: bash
-
-      - name: Package desktop
-        run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.config.ts
-        working-directory: packages/desktop
-        shell: bash
-        timeout-minutes: 60
-        env:
-          OPENCODE_VERSION: ${{ env.ZAINO_VERSION }}
-          OPENCODE_CHANNEL: beta
-          OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
-          ZAINO_UNSIGNED: "1"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v4
         with:
