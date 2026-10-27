@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test"
 import { aliasOfRequestBody, decide, parseBody, type QuotaState } from "./gate"
 
 /**
- * The prompt quota gate.
+ * The token quota gate.
  *
- * The gateway's only customer-facing limit is the prompt count, and it
- * enforces nothing server-side — the token budgets are all effectively
- * unlimited. This gate is therefore the only thing that stops a customer
- * from sending past their allowance, so it has to be right in both
+ * The gateway's customer-facing limit is token usage per alias per billing
+ * period, with the 429 sync guard and the gateway wall enforcing it
+ * server-side. This gate is where the client refuses a prompt before
+ * spending tokens it does not have, so it has to be right in both
  * directions: it must not cut off a customer with budget left, and it must
  * not keep sending past the limit.
  */
@@ -108,7 +108,7 @@ describe("parseBody", () => {
 
 describe("createQuotaGate", () => {
   const snapshot = {
-    snapshot: { promptLimits: { fast: 500 }, promptsByModel: { fast: 10 } },
+    snapshot: { tokenLimits: { fast: 800_000_000 }, tokensByModel: { fast: 10_000_000 } },
     quota: { _tag: "Ok" },
   }
 
@@ -150,7 +150,7 @@ describe("createQuotaGate", () => {
     const { createQuotaGate } = await import("./gate")
     const calls = { count: 0 }
     const spent = {
-      snapshot: { promptLimits: { fast: 500 }, promptsByModel: { fast: 500 } },
+      snapshot: { tokenLimits: { fast: 800_000_000 }, tokensByModel: { fast: 800_000_000 } },
       quota: { _tag: "Exhausted" },
     }
     const spentApi = {
@@ -172,6 +172,29 @@ describe("createQuotaGate", () => {
     expect(calls.count).toBe(2)
     expect(first.allowed).toBe(false)
     expect(second.allowed).toBe(false)
+  })
+
+  test("an older portal that still speaks prompts is read through the same gate", async () => {
+    const { createQuotaGate } = await import("./gate")
+    const calls = { count: 0 }
+    const legacy = {
+      snapshot: { promptLimits: { fast: 500 }, promptsByModel: { fast: 500 } },
+      quota: { _tag: "Exhausted" },
+    }
+    const legacyApi = {
+      zaino: {
+        readUsage: async () => {
+          calls.count++
+          return legacy
+        },
+      },
+    } as any
+    const gate = createQuotaGate(legacyApi, { ttlMs: 60_000 })
+
+    const decision = await gate.check("fast")
+
+    expect(calls.count).toBe(1)
+    expect(decision.allowed).toBe(false)
   })
 
   test("a failed refresh leaves the last known snapshot in place", async () => {

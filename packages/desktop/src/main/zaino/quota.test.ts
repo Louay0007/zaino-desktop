@@ -7,8 +7,11 @@ function snapshot(overrides: Partial<UsageSnapshot> = {}): UsageSnapshot {
   return {
     planCode: "starter",
     models: ["fast", "smart"],
-    promptLimits: { fast: 500, smart: 250 },
-    promptsByModel: { fast: 10, smart: 5 },
+    tokenLimits: { fast: 800_000_000, smart: 40_000_000 },
+    tokensByModel: { fast: 1_000_000, smart: 500_000 },
+    remainingTokensByModel: { fast: 799_000_000, smart: 39_500_000 },
+    tokenExhausted: [],
+    exhaustedByModel: {},
     periodStart: "2026-10-01T00:00:00.000Z",
     periodEnd: "2026-11-01T00:00:00.000Z",
     ...overrides,
@@ -16,28 +19,54 @@ function snapshot(overrides: Partial<UsageSnapshot> = {}): UsageSnapshot {
 }
 
 describe("deriveQuota", () => {
-  test("reports remaining prompts per alias when under the limit", () => {
+  test("reports remaining tokens per alias when under the limit", () => {
     const quota = deriveQuota(snapshot())
     expect(quota).toEqual({
       _tag: "Ok",
       models: ["fast", "smart"],
-      limits: { fast: 500, smart: 250 },
-      remaining: { fast: 490, smart: 245 },
+      limits: { fast: 800_000_000, smart: 40_000_000 },
+      remaining: { fast: 799_000_000, smart: 39_500_000 },
     })
   })
 
-  test("exhausted alias wins over the others", () => {
-    const quota = deriveQuota(snapshot({ promptsByModel: { fast: 500, smart: 5 } }))
+  test("an alias the portal lists as exhausted is exhausted", () => {
+    const quota = deriveQuota(
+      snapshot({
+        remainingTokensByModel: { fast: 0, smart: 39_500_000 },
+        tokenExhausted: ["fast"],
+        exhaustedByModel: { fast: "tokens", smart: null },
+      }),
+    )
+    expect(quota).toEqual({ _tag: "Exhausted", models: ["fast"] })
+  })
+
+  test("an alias whose numbers show it spent is exhausted even when the list omits it", () => {
+    const quota = deriveQuota(snapshot({ tokensByModel: { fast: 800_000_000, smart: 5_000_000 } }))
     expect(quota).toEqual({ _tag: "Exhausted", models: ["fast"] })
   })
 
   test("an alias with no limit is unlimited, not denied", () => {
-    const quota = deriveQuota(snapshot({ promptLimits: { fast: 500 } }))
+    const quota = deriveQuota(snapshot({ tokenLimits: { fast: 800_000_000 } }))
     expect(quota._tag).toBe("Ok")
+  })
+
+  test("missing token fields fail open — an older portal never signs the user out", () => {
+    const quota = deriveQuota({
+      planCode: null,
+      models: ["fast", "smart"],
+      periodStart: "",
+      periodEnd: "",
+    })
+    expect(quota._tag).toBe("Ok")
+    expect(quota.limits).toEqual({})
   })
 
   test("a revoked key fails closed rather than falling back", () => {
     expect(deriveQuota(null, "unauthorized")).toEqual({ _tag: "Unauthorized" })
+  })
+
+  test("a portal failure is an error, not a sign-out", () => {
+    expect(deriveQuota(null, "quota_exhausted")).toEqual({ _tag: "Error", message: "quota_exhausted" })
   })
 
   test("no snapshot is unknown, not ok", () => {
@@ -46,8 +75,8 @@ describe("deriveQuota", () => {
 })
 
 describe("canUse", () => {
-  test("blocks an alias that exhausted its prompt limit", () => {
-    expect(canUse(snapshot({ promptsByModel: { fast: 500 } }), "fast")).toBe(false)
+  test("blocks an alias that exhausted its token limit", () => {
+    expect(canUse(snapshot({ tokensByModel: { fast: 800_000_000, smart: 5 } }), "fast")).toBe(false)
   })
 
   test("allows an alias under its limit", () => {
@@ -55,13 +84,13 @@ describe("canUse", () => {
   })
 
   test("allows an alias with no configured limit", () => {
-    expect(canUse(snapshot({ promptLimits: {} }), "frontier")).toBe(true)
+    expect(canUse(snapshot({ tokenLimits: {} }), "frontier")).toBe(true)
   })
 })
 
 describe("tightest", () => {
   test("picks the alias closest to its limit", () => {
-    expect(tightest({ fast: 500, smart: 250 }, { fast: 100, smart: 200 })).toBe("smart")
+    expect(tightest({ fast: 800, smart: 400 }, { fast: 100, smart: 300 })).toBe("smart")
   })
 
   test("ignores aliases without a usable limit", () => {

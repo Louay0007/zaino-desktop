@@ -1,19 +1,18 @@
 import type { ElectronAPI } from "../api-types"
 
 /**
- * The prompt quota gate.
+ * The prompt gate.
  *
- * The gateway's only customer-facing limit is the prompt count: the token
- * budgets, rpm and tpm are all effectively unlimited, so nothing on the
- * server stops a customer from spending. The client is therefore the place
- * the limit is enforced — which means the client has to know, per alias,
- * how many prompts are left and refuse a send that would exceed it.
+ * The gateway's customer-facing limit is token usage per alias per billing
+ * period; the portal's `/api/device/usage` ledger is the authority. The
+ * client is where the request is refused before it spends tokens it does
+ * not have — so the client has to know, per alias, how many tokens are
+ * left and refuse a send that targets a spent alias.
  *
- * The count comes from the portal's `/api/device/usage`, which is the
- * gateway's own ledger. The gate is deliberately conservative: it blocks
- * only when the ledger says the alias is spent, and it never blocks on a
- * stale or missing snapshot. A customer must never be cut off because the
- * app could not reach the portal.
+ * The gate is deliberately conservative: it blocks only when the ledger
+ * says the alias is spent, and it never blocks on a stale or missing
+ * snapshot. A customer must never be cut off because the app could not
+ * reach the portal.
  */
 
 /** A prompt submission the gate can recognise in the request path. */
@@ -126,13 +125,19 @@ export function createQuotaGate(api: ElectronAPI, input?: { ttlMs?: number }) {
     try {
       const result = await api.zaino.readUsage()
       const snapshot = result?.snapshot as
-        | { promptLimits?: Record<string, number>; promptsByModel?: Record<string, number> }
+        | {
+            tokenLimits?: Record<string, number>
+            tokensByModel?: Record<string, number>
+            // An older portal speaks prompts; the limit math is the same.
+            promptLimits?: Record<string, number>
+            promptsByModel?: Record<string, number>
+          }
         | null
         | undefined
       if (!snapshot) return state
       state = {
-        used: snapshot.promptsByModel ?? {},
-        limits: snapshot.promptLimits ?? {},
+        used: snapshot.tokensByModel ?? snapshot.promptsByModel ?? {},
+        limits: snapshot.tokenLimits ?? snapshot.promptLimits ?? {},
         fetchedAt: Date.now(),
       }
     } catch {
@@ -155,7 +160,8 @@ export function createQuotaGate(api: ElectronAPI, input?: { ttlMs?: number }) {
       // not already show this alias as spent. An exhausted alias is always
       // re-checked: the plan may have been upgraded since the snapshot.
       // The refresh is best-effort: a failure leaves the last known state
-      // in place.
+      // in place, and a missing snapshot never blocks. A customer the app
+      // cannot see the limit for must not be cut off by a guess.
       if (!fresh) await refresh()
       return decide(state, alias)
     },

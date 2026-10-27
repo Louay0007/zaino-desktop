@@ -56,11 +56,11 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
 /**
  * Refuse a prompt the gateway would not serve anyway.
  *
- * The gateway's only customer-facing limit is the prompt count, and it
- * enforces nothing server-side — the token budgets are all effectively
- * unlimited. Without a gate here, the app would happily keep sending after
- * the customer is out of prompts, and the requests would fail upstream
- * instead of the customer being told why.
+ * The gateway's customer-facing limit is token usage per alias, and the
+ * 429 sync guard on `/api/device/usage?model=` plus the gateway wall say
+ * exactly what would be refused. Without a gate here, the app would keep
+ * sending after the customer is out of tokens, and the requests would fail
+ * upstream instead of the customer being told why.
  *
  * The gate reads the portal's own ledger, so it says exactly what the
  * gateway would say. A snapshot it cannot read leaves the request alone:
@@ -85,7 +85,7 @@ async function guardPromptQuota(
   if (decision.allowed) return fetch(input, init)
 
   throw new Error(
-    `Your Zaino plan has no ${decision.alias} prompts left this period. Upgrade the plan to keep going.`,
+    `Your Zaino plan has no ${decision.alias} tokens left this period. Upgrade the plan to keep going.`,
   )
 }
 

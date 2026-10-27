@@ -70,16 +70,27 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   // The resource is refetched after a sign-in or sign-out because the
   // keychain changes under it.
   const [hasKey, { refetch: refetchKey }] = createResource(async () => {
+    let present: boolean
     try {
-      const state = await props.api.zaino.hasKey()
-      if (!state.hasKey) return false
+      present = (await props.api.zaino.hasKey()).hasKey
+    } catch (error) {
+      console.error("[zaino] failed to read key state", error)
+      // Unknowable, not signed out. Returning false here would cover the
+      // app with the sign-in gate while sign-in itself cannot work either;
+      // the app must keep whatever state the user is actually in.
+      return true
+    }
+    if (!present) return false
+    try {
       const usage = await props.api.zaino.readUsage()
-      // The usage call fails closed on a revoked key (main process clears
-      // it); any other failure leaves the key alone, because the portal
-      // being unreachable is not the same as being signed out.
+      // The usage call fails closed ONLY on a revoked key (the main process
+      // clears it and answers "Unauthorized"); any other failure — portal
+      // unreachable, quota exhausted, a transient IPC error — leaves the
+      // key alone, because not reaching the portal is not being signed out.
       return usage?.quota?._tag !== "Unauthorized"
-    } catch {
-      return false
+    } catch (error) {
+      console.error("[zaino] failed to read usage", error)
+      return true
     }
   })
   const [sidecar, { mutate: setSidecar }] = createResource(() => props.api.awaitInitialization())

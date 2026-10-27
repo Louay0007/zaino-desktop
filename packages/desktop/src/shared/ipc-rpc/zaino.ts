@@ -34,8 +34,13 @@ export type ZainoDevicePhase = typeof ZainoDevicePhase.Type
 export const ZainoUsageSnapshot = Schema.Struct({
   planCode: Schema.NullOr(Schema.String),
   models: Schema.Array(Schema.String),
-  promptLimits: Schema.Record(Schema.String, Schema.Number),
-  promptsByModel: Schema.Record(Schema.String, Schema.Number),
+  promptLimits: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  promptsByModel: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  tokenLimits: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  tokensByModel: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  remainingTokensByModel: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+  tokenExhausted: Schema.optional(Schema.Array(Schema.String)),
+  exhaustedByModel: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.Literal("tokens")))),
   periodStart: Schema.String,
   periodEnd: Schema.String,
 })
@@ -52,8 +57,8 @@ export const ZainoQuota = Schema.Union([
   }),
   Schema.Struct({
     _tag: Schema.Literal("Exhausted"),
-    // Every alias with no prompts left — the sign-in surface shows the
-    // whole list, scoped to the alias the user is about to use, instead of
+    // Every alias with no tokens left — the sign-in surface shows the whole
+    // list, scoped to the alias the user is about to use, instead of
     // whichever alias the server happened to iterate first.
     models: Schema.Array(Schema.String),
   }),

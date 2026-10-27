@@ -1,5 +1,5 @@
 name: release
-run-name: "Zaino AI Agent Beta ${{ inputs.version || '1.1.5' }}"
+run-name: "Zaino AI Agent Beta ${{ inputs.version || '1.1.6' }}"
 
 on:
   push:
@@ -8,16 +8,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to build and release (default 1.1.5)"
+        description: "Version to build and release (default 1.1.6)"
         required: false
         type: string
-        default: "1.1.5"
+        default: "1.1.6"
 
 permissions:
   contents: write
 
 env:
-  ZAINO_VERSION: ${{ inputs.version || '1.1.5' }}
+  ZAINO_VERSION: ${{ inputs.version || '1.1.6' }}
   OPENCODE_CHANNEL: beta
   ZAINO_UNSIGNED: "1"
 
@@ -233,7 +233,7 @@ jobs:
 
             The app checks this release feed automatically and offers in-app updates.
           draft: false
-          prerelease: true
+          prerelease: false
           files: |
             /tmp/zaino-dist/*
           fail_on_unmatched_files: true
