@@ -29,15 +29,15 @@ export const ZAINO_MESSAGES = {
   "cancelled": "Sign-in cancelled.",
   "error": "Sign-in failed. Try again.",
   "errorDetail": "{detail}",
-  "usage": "Prompt quota",
-  "usageUnknown": "Prompt quota unavailable.",
-  "usageRemaining": "{remaining} of {limit} prompts left",
+  "usage": "Token quota",
+  "usageUnknown": "Token quota unavailable.",
+  "usageRemaining": "{remaining} of {limit} tokens left",
   "usageLine": "{remaining} of {limit} {model}",
-  "usageTitle": "Prompts left this period",
+  "usageTitle": "Tokens left this period",
   "signedInAs": "Signed in — {models}",
   "viewQuota": "View quota",
   "quotaHeading": "Quota",
-  "usageExhausted": "Your {models} prompt allowance is used up. Upgrade your plan to keep going.",
+  "usageExhausted": "Your {models} token allowance is used up. Upgrade your plan to keep going.",
   "signOut": "Sign out",
   "modelLabel": "Model",
   "planLabel": "Plan",
@@ -49,7 +49,7 @@ export function zainoT(key: ZainoMessageKey, params?: Record<string, string | nu
   const template = ZAINO_MESSAGES[key]
   if (!params) return template
 
-  return template.replace(/\{\{\s*([^{}\s]+)\s*\}\}/g, (match, name: string) =>
+  return template.replace(/\{([a-zA-Z0-9_-]+)\}/g, (match, name: string) =>
     Object.hasOwn(params, name) ? String(params[name]) : match,
   )
 }
