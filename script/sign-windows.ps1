@@ -21,6 +21,14 @@ $vars = @{
 }
 
 if ($vars.Values | Where-Object { -not $_ }) {
+  # A release that ships unsigned is not a slow release, it is a broken one: Windows SmartScreen
+  # stops every user at "Windows protected your PC" and the in-app updater has no publisher to
+  # verify against. Refuse to package rather than produce an artifact nobody can install.
+  if ($env:ZAINO_REQUIRE_SIGNING -eq "1") {
+    $missing = ($vars.GetEnumerator() | Where-Object { -not $_.Value }).Key -join ", "
+    throw "Windows signing is required but not configured (missing: $missing). Set the AZURE_TRUSTED_SIGNING_* secrets, or unset ZAINO_REQUIRE_SIGNING for an intentionally unsigned build."
+  }
+
   Write-Host "Skipping Windows signing because Azure Artifact Signing is not configured"
   exit 0
 }

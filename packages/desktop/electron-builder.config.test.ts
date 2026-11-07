@@ -64,10 +64,69 @@ test.each(channels)("channel identity for $channel", ({ channel, appId }) => {
 
 test("legacy Linux launcher stays hidden", async () => {
   const desktop = await Bun.file(path.join(import.meta.dirname, "resources/linux/opencode-desktop.desktop")).text()
-  expect(desktop).toContain("Exec=/opt/Zaino AI Agent/ai.zaino.desktop %U")
+  // Quoted: the path holds a space, and an unquoted Exec is split into arguments by the launcher.
+  expect(desktop).toContain(`Exec="/opt/Zaino AI Agent/ai.zaino.desktop" %U`)
   expect(desktop).toContain("Icon=ai.zaino.desktop")
   expect(desktop).toContain("StartupWMClass=ai.zaino.desktop")
   expect(desktop).toContain("NoDisplay=true")
+})
+
+test("Windows refuses to package unsigned when signing is required", async () => {
+  // The shipped v1.1.6 installer is `code object is not signed at all`: no secrets were
+  // configured, sign-windows.ps1 printed "Skipping..." and exited 0, and SmartScreen now stops
+  // every user at "Windows protected your PC". A release must fail instead of shipping that.
+  const config = load("beta")
+  const names = ["AZURE_TRUSTED_SIGNING_ENDPOINT", "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME", "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE", "WIN_CSC_LINK"]
+  const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]))
+  const previous = process.env.ZAINO_REQUIRE_SIGNING
+
+  try {
+    for (const name of names) delete process.env[name]
+    process.env.ZAINO_REQUIRE_SIGNING = "1"
+    const unsigned = load("beta")
+    expect(unsigned.win?.signtoolOptions?.sign).toBeUndefined()
+
+    // Windows-only: the same config must let the mac and linux jobs in this workflow through.
+    const afterPack = unsigned.afterPack as (context: { electronPlatformName: string; arch: number }) => Promise<void>
+    // Past this point the build fails on the host's CLI target, not on signing, so assert on the
+    // message it does not carry rather than on a throw this host cannot reproduce.
+    const rejection = (platform: string) =>
+      afterPack({ electronPlatformName: platform, arch: 1 }).then(
+        () => undefined,
+        (error: Error) => error,
+      )
+    expect((await rejection("darwin"))?.message).not.toContain("no Windows signing identity")
+    expect((await rejection("win32"))?.message).toContain("no Windows signing identity")
+
+    process.env.AZURE_TRUSTED_SIGNING_ENDPOINT = "https://example.codesigning.azure.net"
+    process.env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME = "account"
+    process.env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE = "profile"
+    // With Azure configured the custom hook is attached and the guard stops complaining.
+    expect(load("beta").win?.signtoolOptions?.sign).toBeFunction()
+    expect((await rejection("win32"))?.message).not.toContain("no Windows signing identity")
+  } finally {
+    for (const name of names) {
+      if (saved[name] === undefined) delete process.env[name]
+      else process.env[name] = saved[name]
+    }
+
+    if (previous === undefined) delete process.env.ZAINO_REQUIRE_SIGNING
+    else process.env.ZAINO_REQUIRE_SIGNING = previous
+  }
+
+  expect(config.nsis?.oneClick).toBe(true)
+})
+
+test("Windows updates are publisher-verified", () => {
+  // electron-updater reads publisherName from app-update.yml and skips the check when it is
+  // absent, so the flag is inert until signing exists — and is the whole protection once it does.
+  expect(load("beta").win?.verifyUpdateCodeSignature).not.toBe(false)
+  expect(load("beta").electronFuses).toEqual({
+    runAsNode: false,
+    enableCookieEncryption: true,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+  })
 })
 
 test("shared packaging defaults", async () => {

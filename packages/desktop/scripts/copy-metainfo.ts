@@ -26,7 +26,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 
   <description>
     <p>
-      Zaino AI Agent is the desktop client for the Zaino Gateway — Fast, Smart and Frontier models, signed in with your gateway account.
+      Zaino AI Agent is the desktop client for the Zaino Gateway — Fast, Smart, Frontier and Fable models, signed in with your gateway account.
     </p>
   </description>
 

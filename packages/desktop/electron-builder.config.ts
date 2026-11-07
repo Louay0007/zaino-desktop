@@ -39,6 +39,24 @@ async function signWindows(configuration: { path: string }) {
   )
 }
 
+/**
+ * Whether a Windows signing identity is configured.
+ *
+ * Two are supported and they take different paths through electron-builder: Azure Trusted
+ * Signing needs our own hook (the `TrustedSigning` module, driven by sign-windows.ps1), while a
+ * conventional OV/EV certificate is handled by electron-builder itself from WIN_CSC_LINK. Only
+ * attach the custom hook when Azure is the one configured, or the certificate path is skipped.
+ */
+function azureSigningConfigured() {
+  return ["AZURE_TRUSTED_SIGNING_ENDPOINT", "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME", "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE"].every(
+    (name) => Boolean(process.env[name]),
+  )
+}
+
+function certificateSigningConfigured() {
+  return Boolean(process.env.WIN_CSC_LINK)
+}
+
 function macSignOptions(options: CustomMacSignOptions): CustomMacSignOptions {
   return {
     ...options,
@@ -74,6 +92,22 @@ const getBase = (appId: string): Configuration => {
 
   return {
     artifactName: "zaino-desktop-${os}-${arch}.${ext}",
+    // Electron ships with every hardening switch off, because each one breaks some app. These
+    // four break nothing here and close real holes: `ELECTRON_RUN_AS_NODE` would let anyone run
+    // our binary as a plain Node interpreter with our privileges, `NODE_OPTIONS` injects flags
+    // into the main process, `--inspect` opens a debugger port, and an unencrypted cookie jar is
+    // readable by any process that can read the user's profile.
+    //
+    // ponytail: asar integrity and onlyLoadAppFromAsar are stronger still, but a bad integrity
+    // block makes the app fail to start rather than fail visibly, and neither can be verified
+    // on a Windows or Linux target from a macOS host. Turn them on when a signing pipeline can
+    // prove the packaged app boots.
+    electronFuses: {
+      runAsNode: false,
+      enableCookieEncryption: true,
+      enableNodeOptionsEnvironmentVariable: false,
+      enableNodeCliInspectArguments: false,
+    },
     directories: {
       output: "dist",
       buildResources: "resources",
@@ -117,6 +151,23 @@ const getBase = (appId: string): Configuration => {
       },
     ],
     afterPack: async (context) => {
+      // Fail here, not after a 40-minute build, and not silently: an unsigned Windows installer
+      // is stopped by SmartScreen on every machine it reaches, and the updater has no publisher
+      // to verify a download against. `electronPlatformName` is what makes this check Windows-
+      // only, so the macOS and Linux jobs in the same workflow are unaffected.
+      if (
+        context.electronPlatformName === "win32" &&
+        process.env.ZAINO_REQUIRE_SIGNING === "1" &&
+        !azureSigningConfigured() &&
+        !certificateSigningConfigured()
+      ) {
+        throw new Error(
+          "ZAINO_REQUIRE_SIGNING is set but no Windows signing identity is configured. " +
+            "Set AZURE_TRUSTED_SIGNING_{ENDPOINT,ACCOUNT_NAME,CERTIFICATE_PROFILE} (plus AZURE_CLIENT_ID/TENANT_ID/SUBSCRIPTION_ID), " +
+            "or WIN_CSC_LINK for a certificate. Unset ZAINO_REQUIRE_SIGNING for a deliberately unsigned build.",
+        )
+      }
+
       const arch = Arch[context.arch]
 
       // The --arm64 flag picks Electron while OPENCODE_CLI_TARGET picks the CLI and node-pty, so they can disagree.
@@ -184,11 +235,16 @@ const getBase = (appId: string): Configuration => {
     },
     win: {
       icon: `resources/icons/icon.ico`,
-      signtoolOptions: {
-        sign: signWindows,
-      },
+      // The installer verifies the publisher of a downloaded update before running it. With no
+      // certificate configured there is no publisher name to check against and electron-updater
+      // lets the update through, so this flag is a no-op until signing is wired up — and the
+      // protection the moment it is. Leaving it false disables that check even for signed
+      // builds, which is the one case it exists for.
+      verifyUpdateCodeSignature: true,
+      // Only override the signer when Azure is configured. Passing a hook unconditionally
+      // replaces electron-builder's own certificate handling for WIN_CSC_LINK builds.
+      ...(azureSigningConfigured() ? { signtoolOptions: { sign: signWindows } } : {}),
       target: ["nsis", "zip"],
-      verifyUpdateCodeSignature: false,
     },
     nsis: {
       include: path.join(packageDir, "resources", "windows", "installer.nsh"),

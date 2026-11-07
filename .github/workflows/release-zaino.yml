@@ -1,5 +1,5 @@
 name: release
-run-name: "Zaino AI Agent Beta ${{ inputs.version || '1.1.6' }}"
+run-name: "Zaino AI Agent Beta ${{ inputs.version || '1.1.7' }}"
 
 on:
   push:
@@ -8,18 +8,29 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to build and release (default 1.1.6)"
+        description: "Version to build and release (default 1.1.7)"
         required: false
         type: string
-        default: "1.1.6"
+        default: "1.1.7"
 
 permissions:
   contents: write
 
 env:
-  ZAINO_VERSION: ${{ inputs.version || '1.1.6' }}
+  ZAINO_VERSION: ${{ inputs.version || '1.1.7' }}
   OPENCODE_CHANNEL: beta
+  # macOS has no Apple credentials on this repository, so the mac artifacts are ad-hoc signed.
   ZAINO_UNSIGNED: "1"
+  # Windows does have to be signed: an unsigned installer is stopped by SmartScreen for every
+  # user, and the updater has no publisher to verify. The "Package desktop" step requires signing
+  # whenever an identity is configured (see there), so a broken setup fails the release instead of
+  # quietly publishing an installer Windows warns about.
+
+  # Job-level, so `if:` on the Azure login step can read it: `secrets` is not allowed in an `if`
+  # expression, and the login has to be skipped on a Windows build that will not sign.
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   build-cli:
@@ -161,6 +172,16 @@ jobs:
           OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
           OPENCODE_CLI_DIST: ${{ github.workspace }}/packages/cli/dist
 
+      # Azure Trusted Signing authenticates its own module through these; electron-builder's
+      # hook in packages/desktop/electron-builder.config.ts calls the script that uses them.
+      - name: Azure login
+        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Package desktop
         run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
@@ -171,7 +192,11 @@ jobs:
           OPENCODE_CHANNEL: beta
           OPENCODE_CLI_TARGET: ${{ matrix.rust_target }}
           ZAINO_UNSIGNED: "1"
+          ZAINO_REQUIRE_SIGNING: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT != '' && '1' || '0' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
 
       - name: Create macOS .app.tar.gz
         if: runner.os == 'macOS'
@@ -223,7 +248,7 @@ jobs:
           body: |
             ## Zaino AI Agent Beta ${{ env.ZAINO_VERSION }}
 
-            Standalone desktop client for the Zaino Gateway — Fast, Smart and Frontier models, signed in with your gateway account.
+            Standalone desktop client for the Zaino Gateway — Fast, Smart, Frontier and Fable models, signed in with your gateway account.
 
             ### Downloads
             - **macOS (Apple Silicon):** `zaino-desktop-mac-arm64.dmg`

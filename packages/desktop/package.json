@@ -1,7 +1,7 @@
 {
   "name": "@zaino/desktop",
   "private": true,
-  "version": "1.1.6",
+  "version": "1.1.7",
   "type": "module",
   "license": "MIT",
   "homepage": "https://zaino.soon.it",
@@ -65,5 +65,6 @@
     "@lydell/node-pty-linux-x64": "1.2.0-beta.12",
     "@lydell/node-pty-win32-arm64": "1.2.0-beta.12",
     "@lydell/node-pty-win32-x64": "1.2.0-beta.12"
-  }
+  },
+  "description": "Desktop client for the Zaino Gateway."
 }
