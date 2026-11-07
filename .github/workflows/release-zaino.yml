@@ -230,11 +230,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Kept apart per job: every Windows job writes `latest.yml` and every mac job writes
+      # `latest-mac.yml`, so flattening here would keep only one architecture's feed.
       - uses: actions/download-artifact@v4
         with:
           pattern: zaino-desktop-*
-          path: /tmp/zaino-dist
-          merge-multiple: true
+          path: /tmp/zaino-artifacts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Merge update feeds
+        run: node packages/desktop/scripts/merge-update-feeds.mjs /tmp/zaino-artifacts /tmp/zaino-dist
+        shell: bash
 
       - name: List artifacts
         run: ls -la /tmp/zaino-dist
